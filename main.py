@@ -65,6 +65,20 @@ def get_stock_prices(tickers):
             prices[t] = {"price": 0, "change": 0}
     return prices
 
+@st.cache_data(ttl=3600)
+def get_price_history(ticker):
+    """Fetch up to 20 years of daily price history."""
+    try:
+        stock = yf.Ticker(ticker)
+        hist = stock.history(period="20y")
+        if hist.empty:
+            return None
+        hist = hist.reset_index()
+        hist["Date"] = hist["Date"].dt.tz_localize(None)
+        return hist
+    except:
+        return None
+
 def plotly_bg():
     return dict(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font=dict(color='#ccc'))
 
@@ -101,7 +115,7 @@ st.divider()
 # ─── PERFORMANCE GRAPHEN ───
 st.subheader("📈 Performance Graphen")
 
-tab1, tab2, tab3, tab4 = st.tabs(["📊 Excess Return", "📦 Volume by Year", "🏷️ Sector", "🎯 Win/Loss Ratio"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Excess Return", "📦 Volume by Year", "🏷️ Sector", "🎯 Win/Loss Ratio", "📈 20-Jahre Kursverlauf"])
 
 with tab1:
     # Cumulative excess return over time
@@ -163,6 +177,82 @@ with tab4:
                  title="Win/Loss Ratio by Year", barmode="group")
     fig.update_layout(**plotly_bg(), height=400)
     st.plotly_chart(fig, use_container_width=True)
+
+with tab5:
+    st.markdown("**Wähle einen Ticker für 20 Jahre Kursverlauf**")
+    
+    valid_tickers = [t for t in unique_tickers if t not in ("N/A", "") and len(t) <= 5 and t.isalpha()]
+    selected = st.selectbox("Ticker auswählen", valid_tickers, key="hist_ticker")
+    
+    if selected:
+        with st.spinner(f"Lade 20 Jahre Kursdaten für {selected}..."):
+            hist = get_price_history(selected)
+        if hist is not None:
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=hist["Date"], y=hist["Close"],
+                mode='lines', name=f"{selected} Close",
+                line=dict(color='#00f2ff', width=1.5),
+                fill='tozeroy', fillcolor='rgba(0, 242, 255, 0.05)'
+            ))
+            # Add moving averages
+            hist["MA50"] = hist["Close"].rolling(50).mean()
+            hist["MA200"] = hist["Close"].rolling(200).mean()
+            fig.add_trace(go.Scatter(x=hist["Date"], y=hist["MA50"], mode='lines',
+                                     name="MA50", line=dict(color='#ffaa00', width=1)))
+            fig.add_trace(go.Scatter(x=hist["Date"], y=hist["MA200"], mode='lines',
+                                     name="MA200", line=dict(color='#ff4444', width=1)))
+            
+            start_price = hist["Close"].iloc[0]
+            end_price = hist["Close"].iloc[-1]
+            total_return = ((end_price - start_price) / start_price) * 100
+            
+            fig.update_layout(
+                title=f"{selected} — 20-Jahre Kursverlauf",
+                xaxis_title="Date", yaxis_title="Price ($)",
+                **plotly_bg(), height=500,
+                hovermode='x unified'
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Stats
+            col_a, col_b, col_c, col_d = st.columns(4)
+            col_a.metric("💰 Aktuell", f"${end_price:.2f}" if not pd.isna(end_price) else "N/A")
+            col_b.metric("📈 20J Return", f"{total_return:+.1f}%")
+            col_c.metric("🔝 High", f"${hist['High'].max():.2f}")
+            col_d.metric("🔽 Low", f"${hist['Low'].min():.2f}")
+            
+            # Trade markers on chart
+            ticker_trades = df[df["Ticker"] == selected].dropna(subset=["Traded_dt"])
+            if not ticker_trades.empty:
+                st.markdown("**📍 Pelosi-Trades markiert**")
+                fig2 = go.Figure()
+                fig2.add_trace(go.Scatter(
+                    x=hist["Date"], y=hist["Close"],
+                    mode='lines', name=f"{selected} Close",
+                    line=dict(color='#00f2ff', width=1.5), showlegend=True
+                ))
+                for _, trade in ticker_trades.iterrows():
+                    td = trade["Traded_dt"]
+                    if pd.notna(td):
+                        # Find closest price on that date
+                        closest = hist.iloc[(hist["Date"] - td).abs().argsort()[:1]]
+                        if not closest.empty:
+                            px_val = closest["Close"].values[0]
+                            color = '#00ff88' if "Purchase" in str(trade["Type"]) else '#ff4444'
+                            symbol = "triangle-up" if "Purchase" in str(trade["Type"]) else "triangle-down"
+                            fig2.add_trace(go.Scatter(
+                                x=[td], y=[px_val],
+                                mode='markers', name=str(trade["Type"])[:10],
+                                marker=dict(color=color, size=10, symbol=symbol),
+                                showlegend=False,
+                                hovertemplate=f"{trade['Type']}: {trade['Amount']}<br>Return: {trade['Excess Return']}%<extra></extra>"
+                            ))
+                fig2.update_layout(**plotly_bg(), height=300,
+                                   title=f"{selected} mit Pelosi-Trades")
+                st.plotly_chart(fig2, use_container_width=True)
+        else:
+            st.error(f"❌ Keine Kursdaten für {selected} verfügbar")
 
 st.divider()
 
