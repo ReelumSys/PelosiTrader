@@ -192,8 +192,8 @@ with tab5:
             fig.add_trace(go.Scatter(
                 x=hist["Date"], y=hist["Close"],
                 mode='lines', name=f"{selected} Close",
-                line=dict(color='#00f2ff', width=1.5),
-                fill='tozeroy', fillcolor='rgba(0, 242, 255, 0.05)'
+                line=dict(color='#0088ff', width=1.5),
+                fill='tozeroy', fillcolor='rgba(0, 136, 255, 0.05)'
             ))
             # Add moving averages
             hist["MA50"] = hist["Close"].rolling(50).mean()
