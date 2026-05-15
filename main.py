@@ -4,6 +4,8 @@ import requests
 import yfinance as yf
 import json
 import re
+import plotly.express as px
+import plotly.graph_objects as go
 from datetime import datetime
 
 st.set_page_config(page_title="PelosiTrader", layout="wide")
@@ -12,35 +14,23 @@ st.set_page_config(page_title="PelosiTrader", layout="wide")
 st.markdown("""
 <style>
 .stApp { background-color: #0a0a0a; color: #fff; }
-h1, h2, h3 { color: #00f2ff !important; }
+h1, h2, h3, h4 { color: #00f2ff !important; }
 .green { color: #00ff88; font-weight: bold; }
 .red { color: #ff4444; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
 
 # ─── DATA FETCH ───
-COLUMNS = ["Ticker", "Type", "Filed", "Traded", "Description", "Excess Return",
-           "Politician", "Filing ID", "Company Name", "Asset Type", "Amount",
-           "Chamber", "Party", "Sector", "Estimated Value"]
 
 @st.cache_data(ttl=3600)
 def scrape_trades():
-    """Extract Nancy Pelosi's trades from embedded JS variable on QuiverQuant."""
     url = "https://www.quiverquant.com/congresstrading/politician/Nancy%20Pelosi-P000197"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-    
     try:
         r = requests.get(url, headers=headers, timeout=15)
-        
-        # Extract the tradeData JavaScript variable using regex
         match = re.search(r'let tradeData\s*=\s*(\[\[.*?\]\])\s*;', r.text, re.DOTALL)
-        if not match:
-            st.error("tradeData nicht gefunden. Seite hat sich geändert?")
-            return []
-        
-        raw_data = match.group(1)
-        trades = json.loads(raw_data)
-        
+        if not match: return []
+        trades = json.loads(match.group(1))
         result = []
         for t in trades:
             result.append({
@@ -49,7 +39,7 @@ def scrape_trades():
                 "Filed": t[2][:10] if t[2] else "",
                 "Traded": t[3][:10] if t[3] else "",
                 "Description": (t[4] or "")[:80],
-                "Excess Return": t[5] if isinstance(t[5], (int, float)) and not (t[5] != t[5]) else None,  # NaN check
+                "Excess Return": t[5] if isinstance(t[5], (int, float)) and not (t[5] != t[5]) else None,
                 "Company": t[7] if len(t) > 7 else "",
                 "Asset Type": t[8] if len(t) > 8 else "",
                 "Amount": t[9] if len(t) > 9 else "",
@@ -75,15 +65,18 @@ def get_stock_prices(tickers):
             prices[t] = {"price": 0, "change": 0}
     return prices
 
+def plotly_bg():
+    return dict(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font=dict(color='#ccc'))
+
 # ─── MAIN APP ───
 st.title("🏛️ PelosiTrader")
-st.markdown("Live-Tracking aller Nancy Pelosi Stock Trades | Daten von QuiverQuant + Yahoo Finance")
+st.markdown("Live-Tracking Nancy Pelosi Stock Trades | QuiverQuant + Yahoo Finance")
 
 trades = scrape_trades()
 df = pd.DataFrame(trades)
 
 if df.empty:
-    st.error("❌ Keine Trades geladen! QuiverQuant-Seite könnte sich geändert haben oder ist nicht erreichbar.")
+    st.error("❌ Keine Trades geladen!")
     st.stop()
 
 # ─── TOP STATS ───
@@ -98,6 +91,79 @@ col2.metric("🟢 Purchases", buys)
 col3.metric("🔴 Sales", sells)
 col4.metric("💰 Trade Volume", f"${total_value:,.0f}")
 
+# Timestamp
+# Convert Traded dates
+df["Traded_dt"] = pd.to_datetime(df["Traded"], errors="coerce")
+df["Year"] = df["Traded_dt"].dt.year
+
+st.divider()
+
+# ─── PERFORMANCE GRAPHEN ───
+st.subheader("📈 Performance Graphen")
+
+tab1, tab2, tab3, tab4 = st.tabs(["📊 Excess Return", "📦 Volume by Year", "🏷️ Sector", "🎯 Win/Loss Ratio"])
+
+with tab1:
+    # Cumulative excess return over time
+    plot_df = df.dropna(subset=["Excess Return", "Traded_dt"]).sort_values("Traded_dt").copy()
+    plot_df["Cumulative Return"] = plot_df["Excess Return"].cumsum()
+    
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=plot_df["Traded_dt"], y=plot_df["Cumulative Return"],
+        mode='lines', name='Cumulative Excess Return',
+        line=dict(color='#00f2ff', width=2),
+        fill='tozeroy', fillcolor='rgba(0, 242, 255, 0.1)'
+    ))
+    fig.update_layout(
+        title="Cumulative Excess Return Over Time",
+        xaxis_title="Trade Date", yaxis_title="Cumulative Return (%)",
+        **plotly_bg(), height=400
+    )
+    fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
+    st.plotly_chart(fig, use_container_width=True)
+
+with tab2:
+    # Trade volume by year (buy/sell stacked)
+    volume_by_year = df.groupby(["Year", "Type"]).agg(Volume=("Est. Value", "sum")).reset_index()
+    vol_pivot = volume_by_year.pivot(index="Year", columns="Type", values="Volume").fillna(0)
+    # Only keep Purchase and Sale
+    vol_pivot = vol_pivot[[c for c in ["Purchase", "Sale", "Sell", "Exchange"] if c in vol_pivot.columns]]
+    if "Sale" in vol_pivot and "Sell" in vol_pivot:
+        vol_pivot["Sale"] = vol_pivot.get("Sale", 0) + vol_pivot.get("Sell", 0)
+        vol_pivot = vol_pivot.drop(columns=["Sell"], errors="ignore")
+    
+    fig = go.Figure()
+    for col in vol_pivot.columns:
+        color = '#00ff88' if col == "Purchase" else '#ff4444'
+        fig.add_trace(go.Bar(name=col, x=vol_pivot.index, y=vol_pivot[col], marker_color=color))
+    fig.update_layout(barmode='stack', title="Trade Volume by Year", **plotly_bg(), height=400,
+                      yaxis_title="Volume ($)")
+    st.plotly_chart(fig, use_container_width=True)
+
+with tab3:
+    # Sector distribution
+    sector_counts = df["Sector"].value_counts().reset_index()
+    sector_counts.columns = ["Sector", "Trades"]
+    fig = px.pie(sector_counts, values="Trades", names="Sector", title="Trades by Sector",
+                 color_discrete_sequence=px.colors.sequential.Tealgrn,
+                 hole=0.4)
+    fig.update_layout(**plotly_bg(), height=400)
+    fig.update_traces(textposition='inside', textinfo='percent+label')
+    st.plotly_chart(fig, use_container_width=True)
+
+with tab4:
+    # Win/Loss ratio by year
+    df_wl = df.dropna(subset=["Excess Return"]).copy()
+    df_wl["Result"] = df_wl["Excess Return"].apply(lambda x: "Win 🟢" if x > 0 else "Loss 🔴" if x < 0 else "Neutral")
+    wl_by_year = df_wl.groupby(["Year", "Result"]).size().reset_index(name="Count")
+    
+    fig = px.bar(wl_by_year, x="Year", y="Count", color="Result",
+                 color_discrete_map={"Win 🟢": "#00ff88", "Loss 🔴": "#ff4444", "Neutral": "#888"},
+                 title="Win/Loss Ratio by Year", barmode="group")
+    fig.update_layout(**plotly_bg(), height=400)
+    st.plotly_chart(fig, use_container_width=True)
+
 st.divider()
 
 # ─── LIVE WATCHLIST ───
@@ -110,13 +176,9 @@ for ticker in unique_tickers[:25]:
         p = prices[ticker]
         trades_count = len(df[df["Ticker"] == ticker])
         avg_return = df[df["Ticker"] == ticker]["Excess Return"].dropna().mean()
-        
         watchlist.append({
-            "Ticker": ticker,
-            "Price": f"${p['price']:.2f}" if p['price'] else "N/A",
-            "Change": p['change'],
-            "Trades": trades_count,
-            "Avg Excess Return": avg_return
+            "Ticker": ticker, "Price": f"${p['price']:.2f}" if p['price'] else "N/A",
+            "Change": p['change'], "Trades": trades_count, "Avg Excess Return": avg_return
         })
 
 if watchlist:
@@ -129,7 +191,6 @@ if watchlist:
         if isinstance(v, (int, float)):
             return f"{'🟢' if v > 0 else '🔴'} {v:+.1f}%" if v != 0 else "0.0%"
         return "N/A"
-    
     wl["Change"] = wl["Change"].apply(fmt_change)
     wl["Avg Excess Return"] = wl["Avg Excess Return"].apply(fmt_return)
     st.dataframe(wl, use_container_width=True, hide_index=True)
@@ -156,27 +217,22 @@ if search:
     mask = filtered["Company"].str.contains(search, case=False, na=False) | filtered["Sector"].str.contains(search, case=False, na=False)
     filtered = filtered[mask]
 
-# Format display
 display = filtered[["Ticker", "Type", "Filed", "Traded", "Amount", "Excess Return", "Sector"]].copy()
 def fmt_excess(v):
-    if v is None or (isinstance(v, float) and v != v):  # NaN check
+    if v is None or (isinstance(v, float) and v != v):
         return "N/A"
     return f"{'🟢' if v > 0 else '🔴'} {v:+.2f}%"
-
 display["Excess Return"] = display["Excess Return"].apply(fmt_excess)
 display["Type"] = display["Type"].apply(lambda x: f"{'🟢' if 'Purchase' in x else '🔴'} {x}")
-
 st.dataframe(display, use_container_width=True, hide_index=True)
 
 # ─── TOP MOVERS ───
 st.divider()
 st.subheader("🏆 Top Performers & 🗑️ Worst Performers")
-
 valid_returns = df[df["Excess Return"].notna() & (df["Excess Return"] != df["Excess Return"]) == False].copy()
 if not valid_returns.empty:
     top5 = valid_returns.nlargest(5, "Excess Return")
     worst5 = valid_returns.nsmallest(5, "Excess Return")
-    
     c1, c2 = st.columns(2)
     with c1:
         st.markdown("**🏆 Best Trades**")
