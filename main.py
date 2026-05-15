@@ -213,6 +213,26 @@ with tab5:
                 **plotly_bg(), height=500,
                 hovermode='x unified'
             )
+            
+            # Trade markers directly on the chart
+            ticker_trades = df[df["Ticker"] == selected].dropna(subset=["Traded_dt"])
+            for _, trade in ticker_trades.iterrows():
+                td = trade["Traded_dt"]
+                if pd.notna(td):
+                    closest = hist.iloc[(hist["Date"] - td).abs().argsort()[:1]]
+                    if not closest.empty:
+                        px_val = closest["Close"].values[0]
+                        color = '#00ff88' if "Purchase" in str(trade["Type"]) else '#ff4444'
+                        symbol = "triangle-up" if "Purchase" in str(trade["Type"]) else "triangle-down"
+                        fig.add_trace(go.Scatter(
+                            x=[td], y=[px_val],
+                            mode='markers',
+                            marker=dict(color=color, size=10, symbol=symbol,
+                                        line=dict(color='white', width=1)),
+                            showlegend=False,
+                            hovertemplate=f"{trade['Type']}: {trade['Amount']}<br>Return: {trade['Excess Return']}%<extra></extra>"
+                        ))
+            
             st.plotly_chart(fig, use_container_width=True)
             
             # Stats
@@ -221,36 +241,6 @@ with tab5:
             col_b.metric("📈 20J Return", f"{total_return:+.1f}%")
             col_c.metric("🔝 High", f"${hist['High'].max():.2f}")
             col_d.metric("🔽 Low", f"${hist['Low'].min():.2f}")
-            
-            # Trade markers on chart
-            ticker_trades = df[df["Ticker"] == selected].dropna(subset=["Traded_dt"])
-            if not ticker_trades.empty:
-                st.markdown("**📍 Pelosi-Trades markiert**")
-                fig2 = go.Figure()
-                fig2.add_trace(go.Scatter(
-                    x=hist["Date"], y=hist["Close"],
-                    mode='lines', name=f"{selected} Close",
-                    line=dict(color='#00f2ff', width=1.5), showlegend=True
-                ))
-                for _, trade in ticker_trades.iterrows():
-                    td = trade["Traded_dt"]
-                    if pd.notna(td):
-                        # Find closest price on that date
-                        closest = hist.iloc[(hist["Date"] - td).abs().argsort()[:1]]
-                        if not closest.empty:
-                            px_val = closest["Close"].values[0]
-                            color = '#00ff88' if "Purchase" in str(trade["Type"]) else '#ff4444'
-                            symbol = "triangle-up" if "Purchase" in str(trade["Type"]) else "triangle-down"
-                            fig2.add_trace(go.Scatter(
-                                x=[td], y=[px_val],
-                                mode='markers', name=str(trade["Type"])[:10],
-                                marker=dict(color=color, size=10, symbol=symbol),
-                                showlegend=False,
-                                hovertemplate=f"{trade['Type']}: {trade['Amount']}<br>Return: {trade['Excess Return']}%<extra></extra>"
-                            ))
-                fig2.update_layout(**plotly_bg(), height=300,
-                                   title=f"{selected} mit Pelosi-Trades")
-                st.plotly_chart(fig2, use_container_width=True)
         else:
             st.error(f"❌ Keine Kursdaten für {selected} verfügbar")
 
