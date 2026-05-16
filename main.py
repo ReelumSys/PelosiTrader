@@ -199,20 +199,20 @@ with tab5:
             fig.add_trace(go.Scatter(
                 x=hist["Date"], y=hist["BB_Upper"],
                 mode='lines', name="BB Upper (2σ)",
-                line=dict(color='rgba(255,255,255,0.15)', width=0),
+                line=dict(color='rgba(160, 80, 220, 0.15)', width=0),
                 showlegend=True
             ))
             fig.add_trace(go.Scatter(
                 x=hist["Date"], y=hist["BB_Lower"],
                 mode='lines', name="BB Lower (2σ)",
-                line=dict(color='rgba(255,255,255,0.15)', width=0),
-                fill='tonexty', fillcolor='rgba(255,255,255,0.04)',
+                line=dict(color='rgba(160, 80, 220, 0.15)', width=0),
+                fill='tonexty', fillcolor='rgba(160, 80, 220, 0.06)',
                 showlegend=True
             ))
             fig.add_trace(go.Scatter(
                 x=hist["Date"], y=hist["BB_SMA"],
                 mode='lines', name="BB SMA(20)",
-                line=dict(color='rgba(255,255,255,0.25)', width=0.8, dash='dot')
+                line=dict(color='rgba(180, 100, 240, 0.35)', width=0.8, dash='dot')
             ))
             fig.add_trace(go.Scatter(
                 x=hist["Date"], y=hist["Close"],
