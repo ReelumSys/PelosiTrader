@@ -188,14 +188,39 @@ with tab5:
         with st.spinner(f"Lade 20 Jahre Kursdaten für {selected}..."):
             hist = get_price_history(selected)
         if hist is not None:
+            # Bollinger Bands (20-day SMA ± 2σ)
+            hist["BB_SMA"] = hist["Close"].rolling(20).mean()
+            hist["BB_STD"] = hist["Close"].rolling(20).std()
+            hist["BB_Upper"] = hist["BB_SMA"] + 2 * hist["BB_STD"]
+            hist["BB_Lower"] = hist["BB_SMA"] - 2 * hist["BB_STD"]
+
             fig = go.Figure()
+            # Bollinger Bands shaded area
+            fig.add_trace(go.Scatter(
+                x=hist["Date"], y=hist["BB_Upper"],
+                mode='lines', name="BB Upper (2σ)",
+                line=dict(color='rgba(255,255,255,0.15)', width=0),
+                showlegend=True
+            ))
+            fig.add_trace(go.Scatter(
+                x=hist["Date"], y=hist["BB_Lower"],
+                mode='lines', name="BB Lower (2σ)",
+                line=dict(color='rgba(255,255,255,0.15)', width=0),
+                fill='tonexty', fillcolor='rgba(255,255,255,0.04)',
+                showlegend=True
+            ))
+            fig.add_trace(go.Scatter(
+                x=hist["Date"], y=hist["BB_SMA"],
+                mode='lines', name="BB SMA(20)",
+                line=dict(color='rgba(255,255,255,0.25)', width=0.8, dash='dot')
+            ))
             fig.add_trace(go.Scatter(
                 x=hist["Date"], y=hist["Close"],
                 mode='lines', name=f"{selected} Close",
                 line=dict(color='#0088ff', width=1.5),
                 fill='tozeroy', fillcolor='rgba(0, 136, 255, 0.05)'
             ))
-            # Add moving averages
+            # Moving averages
             hist["MA50"] = hist["Close"].rolling(50).mean()
             hist["MA200"] = hist["Close"].rolling(200).mean()
             fig.add_trace(go.Scatter(x=hist["Date"], y=hist["MA50"], mode='lines',
